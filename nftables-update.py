@@ -4,12 +4,16 @@
 Update nftables set for alkivi_connections that are allowed to connect to logstash
 """
 import logging
+import os
 import click
 import nftables
 import json
 import socket
 import ipaddress
+import psutil
+import signal
 
+from jinja2 import Template
 from alkivi.logger import Logger
 
 # Define the global logger
@@ -23,6 +27,7 @@ logger = Logger(
 )
 
 NFT = None
+CACHE_DOMAIN = {}
 
 
 def load_data():
@@ -38,6 +43,33 @@ def get_nftables():
     nft.set_json_output(True)
     NFT = nft
     return nft
+
+
+def update_logstash_conf(connections_data):
+    template_file = "./templates/02-identity.conf.jinja"
+    template_string = ""
+    with open(template_file, "r") as t:
+        template_string = t.read()
+
+    template = Template(template_string)
+    description = template.render(connections_data=connections_data)
+    with open("/etc/logstash/conf.d/02-identify.conf", "w") as f:
+        f.write(description)
+
+    pid = None
+    for proc in psutil.process_iter(["pid", "name"]):
+        if (
+            proc.info["name"] == "java"
+            and "/usr/share/logstash/jdk/bin/java" in proc.cmdline()
+        ):
+            logger.debug(f"PID: {proc.info['pid']}", proc)
+            pid = proc.info["pid"]
+            break
+    if pid is None:
+        logger.warning("Unable to find process in psutil")
+    else:
+        logger.debug(f"Sending SIGHUP to pid {pid}")
+        os.kill(pid, signal.SIGHUP)
 
 
 def run_nft_command(command):
@@ -56,10 +88,14 @@ def run_nft_command(command):
 
 
 def get_domain_ip(domain):
+    global CACHE_DOMAIN
+    if domain in CACHE_DOMAIN:
+        return CACHE_DOMAIN[domain]
     try:
         data = socket.gethostbyname(domain)
         try:
             ipaddress.ip_address(data)
+            CACHE_DOMAIN[domain] = data
             return data
         except ValueError:
             logger.warning(f"Domain {domain} resolv to ip {data} but is not valid")
@@ -128,18 +164,25 @@ def update(ctx):
 
     # Build new_ips
     new_ips = set()
+    logstash_data = {}
     connections_data = load_data()
     for customer, domains in connections_data.items():
+        ips = []
         for domain in domains:
             ip = get_domain_ip(domain)
             if ip is not None:
                 new_ips.add(ip)
+                ips.append(ip)
+        if ips:
+            logstash_data[customer] = ips
     logger.debug("Current IPs are", new_ips)
 
+    has_change = False
     for ip in current_ips:
         if ip not in new_ips:
             logger.debug(f"Will remove ip {ip}")
             result = remove_ip(ip)
+            has_change = True
             if result is None:
                 logger.warning(f"Unable to remove ip {ip}")
             else:
@@ -149,10 +192,14 @@ def update(ctx):
         if ip not in current_ips:
             logger.debug(f"Will add ip {ip}")
             result = add_ip(ip)
+            has_change = True
             if result is None:
                 logger.warning(f"Unable to add ip {ip}")
             else:
                 logger.info(f"Successfully added ip {ip}")
+
+    if has_change:
+        update_logstash_conf(logstash_data)
 
 
 if __name__ == "__main__":

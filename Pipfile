@@ -7,6 +7,8 @@ name = "pypi"
 alkivi-logger = "*"
 ansibleguy-nftables = "*"
 click = "*"
+jinja2 = "*"
+psutil = "*"
 
 [dev-packages]
 black = "*"

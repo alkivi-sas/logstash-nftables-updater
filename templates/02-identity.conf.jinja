@@ -1,0 +1,32 @@
+filter {
+    if [type] == "firewall" {
+        if ![log][syslog][hostname] {
+        {% for customer, ips in connections_data.items() %}
+            if [host][ip] in {{ ips }} {
+                mutate {
+                    add_tag => [ "firewall" ]
+                    replace => { "host" => "gateway.{{ customer }}" }
+                    
+                }
+            }
+        {% endfor %}
+        } else {
+            mutate {
+                add_tag => [ "firewall" ]
+                rename => { "[log][syslog][hostname]" => "host" }
+            }
+        }
+        grok {
+            match => { "host" => "gateway\.%{GREEDYDATA:logfile}" }
+            add_field => { "[@metadata][logfile]" => "%{logfile}.log" }
+            add_field => { "[@metadata][customer]" => "%{logfile}" }
+        }
+
+    } else {
+        mutate {
+            add_tag => [ "syslog" ]
+            add_field => { "[@metadata][customer]" => "others" }
+            add_field => { "[@metadata][logfile]" => "others.log" }
+        }
+    }
+}
