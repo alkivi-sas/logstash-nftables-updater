@@ -116,10 +116,9 @@ def update(ctx):
         logger.warning("Unable to extract set from data", current_data)
         exit(1)
 
-    if "elem" not in set_data:
-        logger.warning("Unable to extract elem from set_data", set_data)
-        exit(1)
-    current_ips = set(set_data["elem"])
+    current_ips = []
+    if "elem" in set_data:
+        current_ips = set(set_data["elem"])
     logger.debug("current_ips are", current_ips)
 
     # Build new_ips
