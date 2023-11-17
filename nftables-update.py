@@ -25,6 +25,11 @@ logger = Logger(
 NFT = None
 
 
+def load_data():
+    f = open("/etc/alkivi.conf.d/alkivi_connections.conf", encoding="utf-8")
+    return json.load(f)
+
+
 def get_nftables():
     global NFT
     if NFT is not None:
@@ -123,13 +128,12 @@ def update(ctx):
 
     # Build new_ips
     new_ips = set()
-    with open("/etc/alkivi.conf.d/alkivi_connections.conf", encoding="utf-8") as f:
-        for line in f:
-            line = line.replace("\n", "").strip()
-            if line:
-                ip = get_domain_ip(line)
-                if ip is not None:
-                    new_ips.add(ip)
+    connections_data = load_data()
+    for customer, domains in connections_data.items():
+        for domain in domains:
+            ip = get_domain_ip(domain)
+            if ip is not None:
+                new_ips.add(ip)
     logger.debug("Current IPs are", new_ips)
 
     for ip in current_ips:
