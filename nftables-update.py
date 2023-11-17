@@ -76,9 +76,8 @@ def remove_ip(ip):
 
 @click.group()
 @click.option("--debug", default=False, is_flag=True, help="Toggle Debug mode")
-@click.option("--dry/--no-dry", default=True, is_flag=True, help="Toggle DRY mode")
 @click.pass_context
-def run(ctx: click.Context, debug: bool, dry: bool):
+def run(ctx: click.Context, debug: bool):
     """General group."""
     if debug:
         logger.set_min_level_to_print(logging.DEBUG)
@@ -86,21 +85,16 @@ def run(ctx: click.Context, debug: bool, dry: bool):
         logger.set_min_level_to_mail(None)
         logger.debug("debug activated")
 
-    if dry:
-        logger.set_min_level_to_save(logging.DEBUG)
-        logger.info("DRY MODE activated")
-    else:
-        logger.set_min_level_to_mail(logging.WARNING)
-
     ctx.ensure_object(dict)
     ctx.obj["debug"] = debug
-    ctx.obj["dry"] = dry
 
 
 @run.command()
 @click.pass_context
 def update(ctx):
     """Will update nftables set alkivi_connections with current_ips."""
+    logger.debug("Starting update")
+
     # List existing IPs
     command = "list set inet firewall alkivi_connections"
     current_data = run_nft_command(command)
