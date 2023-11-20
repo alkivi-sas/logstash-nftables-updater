@@ -8,10 +8,11 @@ import os
 import click
 import nftables
 import json
-import socket
 import ipaddress
+import time
 import psutil
 import signal
+import dns.resolver
 
 from jinja2 import Template
 from alkivi.logger import Logger
@@ -28,6 +29,20 @@ logger = Logger(
 
 NFT = None
 CACHE_DOMAIN = {}
+RESOLVER = None
+SLEEP_INTERVAL = 0.1
+
+
+def get_resolver():
+    global RESOLVER
+    if RESOLVER is not None:
+        return RESOLVER
+
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = ["8.8.8.8", "1.1.1.1"]
+
+    RESOLVER = resolver
+    return resolver
 
 
 def load_data():
@@ -62,7 +77,7 @@ def update_logstash_conf(connections_data):
             proc.info["name"] == "java"
             and "/usr/share/logstash/jdk/bin/java" in proc.cmdline()
         ):
-            logger.debug(f"PID: {proc.info['pid']}", proc)
+            logger.debug(f"Found logstash at PID: {proc.info['pid']} {proc}")
             pid = proc.info["pid"]
             break
     if pid is None:
@@ -91,18 +106,40 @@ def get_domain_ip(domain):
     global CACHE_DOMAIN
     if domain in CACHE_DOMAIN:
         return CACHE_DOMAIN[domain]
-    try:
-        data = socket.gethostbyname(domain)
+
+    resolver = get_resolver()
+    iteration = 0
+    stop = False
+    while not stop:
+        iteration += 1
+        if iteration == 10:
+            stop = True
+
         try:
-            ipaddress.ip_address(data)
-            CACHE_DOMAIN[domain] = data
-            return data
-        except ValueError:
-            logger.warning(f"Domain {domain} resolv to ip {data} but is not valid")
-            return None
-    except Exception as e:
-        logger.warning(f"Unable to resolve {domain}", e)
-        return None
+            answers = resolver.resolve(domain)
+            if not len(answers):
+                time.sleep(SLEEP_INTERVAL)
+                continue
+            answer = answers[0]
+            if len(answers) > 1:
+                logger.warning(
+                    f"Got multiple answers for domain {domain} will take the first one"
+                )
+            ip = answer.to_text()
+            try:
+                ipaddress.ip_address(ip)
+                CACHE_DOMAIN[domain] = ip
+                return ip
+            except ValueError:
+                logger.warning(f"Domain {domain} resolv to ip {ip} but is not valid")
+                return None
+        except Exception:
+            time.sleep(SLEEP_INTERVAL)
+            pass
+
+    logger.warning(f"Unable to resolve {domain}")
+    exit(0)
+    return None
 
 
 def add_ip(ip):
@@ -117,8 +154,9 @@ def remove_ip(ip):
 
 @click.group()
 @click.option("--debug", default=False, is_flag=True, help="Toggle Debug mode")
+@click.option("--force", default=False, is_flag=True, help="Force Update")
 @click.pass_context
-def run(ctx: click.Context, debug: bool):
+def run(ctx: click.Context, debug: bool, force: bool):
     """General group."""
     if debug:
         logger.set_min_level_to_print(logging.DEBUG)
@@ -128,6 +166,7 @@ def run(ctx: click.Context, debug: bool):
 
     ctx.ensure_object(dict)
     ctx.obj["debug"] = debug
+    ctx.obj["force"] = debug
 
 
 @run.command()
@@ -135,6 +174,8 @@ def run(ctx: click.Context, debug: bool):
 def update(ctx):
     """Will update nftables set alkivi_connections with current_ips."""
     logger.debug("Starting update")
+
+    force = ctx.obj["force"]
 
     # List existing IPs
     command = "list set inet firewall alkivi_connections"
@@ -160,12 +201,12 @@ def update(ctx):
     current_ips = []
     if "elem" in set_data:
         current_ips = set(set_data["elem"])
-    logger.debug("current_ips are", current_ips)
 
     # Build new_ips
     new_ips = set()
     logstash_data = {}
     connections_data = load_data()
+    ips_to_customer = {}
     for customer, domains in connections_data.items():
         ips = []
         for domain in domains:
@@ -174,8 +215,9 @@ def update(ctx):
                 new_ips.add(ip)
                 ips.append(ip)
         if ips:
+            for ip in ips:
+                ips_to_customer[ip] = customer
             logstash_data[customer] = ips
-    logger.debug("Current IPs are", new_ips)
 
     has_change = False
     for ip in current_ips:
@@ -190,15 +232,16 @@ def update(ctx):
 
     for ip in new_ips:
         if ip not in current_ips:
-            logger.debug(f"Will add ip {ip}")
+            customer = ips_to_customer[ip]
+            logger.debug(f"Will add ip {ip} (domain {customer})")
             result = add_ip(ip)
             has_change = True
             if result is None:
                 logger.warning(f"Unable to add ip {ip}")
             else:
-                logger.info(f"Successfully added ip {ip}")
+                logger.info(f"Successfully added ip {ip} for customer {customer}")
 
-    if has_change:
+    if has_change or force:
         update_logstash_conf(logstash_data)
 
 

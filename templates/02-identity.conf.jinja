@@ -2,6 +2,15 @@ filter {
     if [type] == "firewall" {
         if ![log][syslog][hostname] {
         {% for customer, ips in connections_data.items() %}
+        {% if ips|length == 1 %}
+            if [host][ip] == "{{ ips[0] }}" {
+                mutate {
+                    add_tag => [ "firewall" ]
+                    replace => { "host" => "gateway.{{ customer }}" }
+                    
+                }
+            }
+        {% else %}
             if [host][ip] in {{ ips }} {
                 mutate {
                     add_tag => [ "firewall" ]
@@ -9,6 +18,7 @@ filter {
                     
                 }
             }
+        {% endif %}
         {% endfor %}
         } else {
             mutate {

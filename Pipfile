@@ -9,6 +9,7 @@ ansibleguy-nftables = "*"
 click = "*"
 jinja2 = "*"
 psutil = "*"
+dnspython = "*"
 
 [dev-packages]
 black = "*"
