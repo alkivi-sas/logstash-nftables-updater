@@ -39,7 +39,7 @@ def get_resolver():
         return RESOLVER
 
     resolver = dns.resolver.Resolver()
-    resolver.nameservers = ["8.8.8.8", "1.1.1.1"]
+    resolver.nameservers = ["8.8.8.8", "1.1.1.1", "213.186.33.99", "9.9.9.9"]
 
     RESOLVER = resolver
     return resolver
@@ -138,7 +138,6 @@ def get_domain_ip(domain):
             pass
 
     logger.warning(f"Unable to resolve {domain}")
-    exit(0)
     return None
 
 
