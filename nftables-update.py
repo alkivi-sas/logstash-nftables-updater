@@ -39,7 +39,7 @@ def get_resolver():
         return RESOLVER
 
     resolver = dns.resolver.Resolver()
-    resolver.nameservers = ["8.8.8.8", "1.1.1.1", "213.186.33.99", "9.9.9.9"]
+    resolver.nameservers = ["213.186.33.99"]
 
     RESOLVER = resolver
     return resolver
@@ -206,9 +206,12 @@ def update(ctx):
     logstash_data = {}
     connections_data = load_data()
     ips_to_customer = {}
+    logger.new_loop_logger()
     for customer, domains in connections_data.items():
+        logger.new_iteration(prefix=customer)
         ips = []
         for domain in domains:
+            logger.debug(f"Resolving {domain}")
             ip = get_domain_ip(domain)
             if ip is not None:
                 new_ips.add(ip)
@@ -217,6 +220,7 @@ def update(ctx):
             for ip in ips:
                 ips_to_customer[ip] = customer
             logstash_data[customer] = ips
+    logger.del_loop_logger()
 
     has_change = False
     for ip in current_ips:
